@@ -41,13 +41,17 @@ if (!frontendOrigin) {
         "Warning: BETTER_AUTH_URL not set in .env. Set it before using authenticated routes."
     );
 }
-
 const allowedOrigins = new Set(
-    [process.env.BETTER_AUTH_URL, process.env.CORS_ORIGINS]
+    [
+        process.env.BETTER_AUTH_URL,
+        process.env.CLIENT_URL,
+        process.env.CORS_ORIGINS,
+    ]
         .flatMap((value) => (value || "").split(","))
         .map((value) => value.trim().replace(/\/+$/, ""))
         .filter(Boolean)
 );
+
 
 // devMode: the configured frontend is a local loopback http URL, i.e. this
 // server backs a machine-local frontend (not a deployed one).
