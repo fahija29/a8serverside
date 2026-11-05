@@ -2,6 +2,13 @@
 
 Express 5 + MongoDB Atlas REST API. Runs as a normal Node server locally and as a Vercel serverless function with the same code.
 
+## Tech stack
+
+- **Runtime:** Node.js (Node 18+ recommended)
+- **Framework:** Express 5
+- **Database:** MongoDB Atlas via the native `mongodb` driver
+- **Auth:** JWT verification against a Better Auth JWKS endpoint
+
 ## Routes
 
 | Method | Endpoint | Description | Auth |
