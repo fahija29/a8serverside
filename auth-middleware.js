@@ -2,53 +2,91 @@ import jwt from "jsonwebtoken";
 import crypto from "node:crypto";
 
 const JWKS_TTL = 10 * 60 * 1000;
+const JWKS_TIMEOUT = 10000;
 
 let jwks = {
     keys: [],
     fetchedAt: 0,
 };
 
+let jwksPromise = null;
+
 function authBaseUrl() {
-    const url = (
-        process.env.BETTER_AUTH_URL || ""
-    ).replace(/\/+$/, "");
+    const url = (process.env.BETTER_AUTH_URL || "").replace(/\/+$/, "");
 
     if (!url) {
         throw new Error(
-            "BETTER_AUTH_URL is not set in .env. Add it (the frontend URL, e.g. http://localhost:3000 in dev) before using authenticated routes."
+            "BETTER_AUTH_URL is not set in .env. Add your frontend URL, e.g. http://localhost:3000."
         );
     }
 
     return url;
 }
 
+/**
+ * Fetches and caches Better Auth JWKS.
+ * Concurrent requests reuse the same fetch promise.
+ */
 async function loadJwks(forceRefresh = false) {
-    if (
-        !forceRefresh &&
+    const cacheIsValid =
         jwks.keys.length > 0 &&
-        Date.now() - jwks.fetchedAt < JWKS_TTL
-    ) {
+        Date.now() - jwks.fetchedAt < JWKS_TTL;
+
+    if (!forceRefresh && cacheIsValid) {
         return;
     }
 
-    const response = await fetch(
-        `${authBaseUrl()}/api/auth/jwks`
+    if (jwksPromise) {
+        return jwksPromise;
+    }
+
+    const request = (async () => {
+        const response = await fetch(
+            `${authBaseUrl()}/api/auth/jwks`,
+            {
+                signal: AbortSignal.timeout(JWKS_TIMEOUT),
+            }
+        );
+
+        if (!response.ok) {
+            throw new Error(`JWKS fetch failed (${response.status})`);
+        }
+
+        const data = await response.json();
+
+        if (!Array.isArray(data.keys) || data.keys.length === 0) {
+            throw new Error("No JWKS keys available");
+        }
+
+        jwks = {
+            keys: data.keys,
+            fetchedAt: Date.now(),
+        };
+    })();
+
+    jwksPromise = request;
+
+    try {
+        await request;
+    } finally {
+        if (jwksPromise === request) {
+            jwksPromise = null;
+        }
+    }
+}
+
+/**
+ * Finds a valid ES256 public signing key.
+ */
+function findSigningKey(kid) {
+    return jwks.keys.find(
+        (item) =>
+            item.kid === kid &&
+            item.kty === "EC" &&
+            item.crv === "P-256" &&
+            (!item.use || item.use === "sig") &&
+            (!item.alg || item.alg === "ES256")
     );
-
-    if (!response.ok) {
-        throw new Error(`JWKS fetch failed (${response.status})`);
-    }
-
-    const data = await response.json();
-
-    if (!Array.isArray(data.keys) || data.keys.length === 0) {
-        throw new Error("No JWKS keys available");
-    }
-
-    jwks = {
-        keys: data.keys,
-        fetchedAt: Date.now(),
-    };
 }
 
 export async function requireAuth(req, res, next) {
@@ -86,26 +124,12 @@ export async function requireAuth(req, res, next) {
 
         await loadJwks();
 
-        let key = jwks.keys.find(
-            (item) =>
-                item.kid === kid &&
-                item.kty === "EC" &&
-                item.crv === "P-256" &&
-                (!item.use || item.use === "sig") &&
-                (!item.alg || item.alg === "ES256")
-        );
+        let key = findSigningKey(kid);
 
+        // Refresh JWKS if the signing key is not found.
         if (!key) {
             await loadJwks(true);
-
-            key = jwks.keys.find(
-                (item) =>
-                    item.kid === kid &&
-                    item.kty === "EC" &&
-                    item.crv === "P-256" &&
-                    (!item.use || item.use === "sig") &&
-                    (!item.alg || item.alg === "ES256")
-            );
+            key = findSigningKey(kid);
         }
 
         if (!key) {
@@ -140,7 +164,6 @@ export async function requireAuth(req, res, next) {
         };
 
         next();
-
     } catch (error) {
         console.error("Authentication error:", error.message);
 
