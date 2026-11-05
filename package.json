@@ -3,9 +3,16 @@
     "version": "1.0.0",
     "description": "BookNook Express Server",
     "license": "ISC",
-    "author": "",
+    "author": "cat_ron",
     "type": "module",
     "main": "index.js",
+    "keywords": [
+        "express",
+        "mongodb",
+        "rest-api",
+        "jwt",
+        "serverless"
+    ],
     "engines": {
         "node": ">=18"
     },
