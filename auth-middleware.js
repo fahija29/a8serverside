@@ -12,7 +12,14 @@ let jwks = {
 let jwksPromise = null;
 
 function authBaseUrl() {
-    const url = (process.env.BETTER_AUTH_URL || "").replace(/\/+$/, "");
+    // BETTER_AUTH_URL is preferred; CLIENT_URL is accepted as a fallback
+    // naming, holding the same frontend URL (its /api/auth/jwks is the
+    // source of signing keys).
+    const url = (
+        process.env.BETTER_AUTH_URL ||
+        process.env.CLIENT_URL ||
+        ""
+    ).replace(/\/+$/, "");
 
     if (!url) {
         throw new Error(
@@ -62,6 +69,10 @@ async function loadJwks(forceRefresh = false) {
             keys: data.keys,
             fetchedAt: Date.now(),
         };
+
+        console.log(
+            `JWKS loaded from frontend (${data.keys.length} key${data.keys.length === 1 ? "" : "s"}) — frontend↔server connection OK.`
+        );
     })();
 
     jwksPromise = request;

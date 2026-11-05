@@ -1,6 +1,7 @@
 import express from "express";
 import { ObjectId } from "mongodb";
 import { pathToFileURL } from "node:url";
+import os from "node:os";
 import cors from "cors";
 import "dotenv/config";
 import { requireAuth } from "./auth-middleware.js";
@@ -21,10 +22,18 @@ if (!process.env.PORT) {
 
 app.use(express.json());
 
-// CORS origin comes only from .env (BETTER_AUTH_URL) —
-// set your deployed frontend URL here before deploying.
+// CORS origin(s) come from .env — BETTER_AUTH_URL is the primary frontend
+// URL; CORS_ORIGINS (optional) adds more as a comma-separated list. The
+// allowlist also gains the localhost/127.0.0.1 twins of every http entry,
+// so browsing via http://127.0.0.1:3000 or a LAN URL isn't broken by an
+// origin-string mismatch (the browser blocks any non-matching response).
+//
+// CLIENT_URL is accepted as a fallback naming (some hosts set it instead);
+// it must hold the same frontend URL.
 const frontendOrigin = (
-    process.env.BETTER_AUTH_URL || ""
+    process.env.BETTER_AUTH_URL ||
+    process.env.CLIENT_URL ||
+    ""
 ).replace(/\/+$/, "");
 
 if (!frontendOrigin) {
@@ -33,9 +42,95 @@ if (!frontendOrigin) {
     );
 }
 
+const allowedOrigins = new Set(
+    [process.env.BETTER_AUTH_URL, process.env.CORS_ORIGINS]
+        .flatMap((value) => (value || "").split(","))
+        .map((value) => value.trim().replace(/\/+$/, ""))
+        .filter(Boolean)
+);
+
+// devMode: the configured frontend is a local loopback http URL, i.e. this
+// server backs a machine-local frontend (not a deployed one).
+const devMode =
+    frontendOrigin.startsWith("http://localhost") ||
+    frontendOrigin.startsWith("http://127.0.0.1");
+
+for (const entry of [...allowedOrigins]) {
+    try {
+        const parsed = new URL(entry);
+
+        if (
+            parsed.hostname === "localhost" ||
+            parsed.hostname === "127.0.0.1"
+        ) {
+            const port = parsed.port ? `:${parsed.port}` : "";
+
+            allowedOrigins.add(`http://localhost${port}`);
+            allowedOrigins.add(`http://127.0.0.1${port}`);
+        }
+    } catch {
+        // Not a URL — leave as stored.
+    }
+}
+
+// Dev convenience: when the configured frontend is a loopback URL, this
+// machine is being used for live development. Also trust its LAN IP(s)
+// (192.168.x.x / 10.x / 172.16–31.x) with the same port, so browsing via
+// the URL Next.js prints in its startup banner ("Network: …") works.
+// A https-deployed frontend adds nothing here — production stays strict.
+try {
+    const frontendURL = new URL(frontendOrigin);
+    const isLoopback =
+        frontendURL.hostname === "localhost" ||
+        frontendURL.hostname === "127.0.0.1";
+    const frontendPort = frontendURL.port;
+    const isPrivate = (ip) =>
+        /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(ip);
+
+    if (isLoopback && frontendPort) {
+        for (const list of Object.values(os.networkInterfaces())) {
+            for (const address of list ?? []) {
+                if (
+                    address.family === "IPv4" &&
+                    !address.internal &&
+                    isPrivate(address.address)
+                ) {
+                    allowedOrigins.add(
+                        `http://${address.address}:${frontendPort}`
+                    );
+                }
+            }
+        }
+    }
+} catch {
+    // No usable frontend URL — keep just the explicit entries.
+}
+
 app.use(
     cors({
-        origin: frontendOrigin,
+        // Reflect the request's Origin only when it is allow-listed; unknown
+        // origins get NO Access-Control-Allow-Origin header, so the browser
+        // blocks them (a fixed string here would mismatch and break access).
+        
+        // Non-browser tools (curl/Postman) send no Origin and pass through.
+        origin: (origin, callback) => {
+            // In dev (loopback-configured frontend), any localhost/127.0.0.1
+            // port is trusted — Next.js may shift the dev port (3001, 3002…)
+            // when 3000 is busy.
+            const isDevLoopback =
+                devMode && /^http:\/\/(localhost|127\.0\.0\.1):\d+$/.test(origin);
+
+            if (!origin || allowedOrigins.has(origin) || isDevLoopback) {
+                callback(null, true);
+                return;
+            }
+
+            console.warn(
+                `CORS: blocked request from origin ${origin} (not in allowlist)`
+            );
+
+            callback(null, false);
+        },
         methods: ["GET", "POST", "PATCH", "DELETE"],
         allowedHeaders: ["Content-Type", "Authorization"],
     })
@@ -81,10 +176,14 @@ function serverError(res, message) {
 
 // ==========================================
 // HEALTH CHECK
-// GET /
-// ==========================================
-
-app.get("/", (req, res) => {
+// GET /  and  GET /health
+//
+// On the Vercel serverless deployment the bare "/" path is resolved to
+// this handler's source file (api/index.js) by the CDN before the
+// function runs — so the canonical health endpoint is "/health", which
+// always reaches the function. Keep GET / for the long-running
+// `node index.js` workflow.
+app.get(["/", "/health"], (req, res) => {
     res.send({
         success: true,
         message: "BookNook Server is running fine",
@@ -862,7 +961,7 @@ async function startServer() {
         server.on("error", (error) => {
             if (error.code === "EADDRINUSE") {
                 console.error(
-                    `Port ${PORT} is already in use. Stop the other server or set a different PORT in the .env file.`
+                    `Port ${PORT} is already in use — probably a stale "node index.js" instance. Stop the other server manually (Task Manager or "taskkill /F /PID <pid>") or run "npm run restart", which frees the port for you first. Alternatively, set a different PORT in the .env file.`
                 );
             } else {
                 console.error("Server error:", error);
