@@ -23,7 +23,7 @@ function authBaseUrl() {
 
     if (!url) {
         throw new Error(
-            "BETTER_AUTH_URL is not set in .env. Add your frontend URL, e.g. http://localhost:3000."
+            "BETTER_AUTH_URL is not set in .env. Add your frontend URL, e.g. https://your-frontend.vercel.app."
         );
     }
 
