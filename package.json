@@ -17,8 +17,9 @@
         "node": ">=18"
     },
     "scripts": {
-        "dev": "nodemon index.js",
-        "start": "node index.js"
+        "dev": "node scripts/free-port.mjs && nodemon index.js",
+        "start": "node index.js",
+        "restart": "node scripts/free-port.mjs && node index.js"
     },
     "dependencies": {
         "cors": "^2.8.6",
