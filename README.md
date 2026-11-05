@@ -35,13 +35,20 @@ Express 5 + MongoDB Atlas REST API. Runs as a normal Node server locally and as 
 
 ```bash
 npm install
-npm run dev      # nodemon
+npm run dev      # nodemon (frees port 8000 automatically first)
 # or
 npm start        # plain node
+# or, after a forgotten instance is still holding the port:
+npm run restart  # stops the stale listener, then boots a fresh server
 
 # health check
 curl http://localhost:8000/
 ```
+
+> **"Port 8000 is already in use"?** It means an earlier `node index.js`
+> instance is still running. `npm run restart` (or `npm run dev`) stops
+> that stale listener for you and starts fresh — see
+> `scripts/free-port.mjs`.
 
 ## Deploy to GitHub
 
