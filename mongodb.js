@@ -2,25 +2,17 @@ import { MongoClient } from "mongodb";
 
 // ==========================================
 // LAZY, CACHED MONGODB CONNECTION
-// - Works as a long-running server (connects once)
-// - Works as a Vercel serverless function (caches
-//   the client on globalThis so warm invocations
-//   reuse the same connection instead of opening
-//   a new one per request, which would exhaust
-//   Atlas connection limits)
 // ==========================================
 
-// Resolve MONGODB_URI from env each time this module loads.
-// Local: .env via dotenv. Vercel: project env vars.
 const uri = process.env.MONGODB_URI?.trim();
 
 if (!uri) {
     throw new Error(
-        "MONGODB_URI is not set. Add it to your .env file (local) or to your Vercel project's Environment Variables (production)."
+        "MONGODB_URI is not set. Add it to your .env file (local) or to your deployment environment variables."
     );
 }
 
-// Reuse the client across function invocations.
+// Reuse the MongoDB client across serverless invocations.
 const globalCache = globalThis;
 
 export const mongoClient =
@@ -31,12 +23,13 @@ globalCache.__booknookMongoClient = mongoClient;
 let collectionsPromise = globalCache.__booknookCollectionsPromise;
 
 /**
- * Connects (once) and returns { books, borrows } collections.
- * Safe to call in every request handler — the result is cached.
+ * Connects to MongoDB once and returns books and borrows collections.
+ * Reuses the cached connection promise.
+ * Clears the failed promise so future requests can retry.
  */
 export function getCollections() {
     if (!collectionsPromise) {
-        collectionsPromise = (async () => {
+        const connectionPromise = (async () => {
             await mongoClient.connect();
 
             const db = mongoClient.db("BookNook");
@@ -44,7 +37,7 @@ export function getCollections() {
             const books = db.collection("books");
             const borrows = db.collection("borrows");
 
-            // Prevent duplicate borrowing by the same user.
+            // Prevent duplicate active borrowing by the same user.
             await borrows.createIndex(
                 { bookId: 1, userEmail: 1 },
                 { unique: true }
@@ -54,6 +47,15 @@ export function getCollections() {
 
             return { books, borrows };
         })();
+
+        collectionsPromise = connectionPromise.catch((error) => {
+            collectionsPromise = undefined;
+            globalCache.__booknookCollectionsPromise = undefined;
+
+            console.error("MongoDB connection failed:", error.message);
+
+            throw error;
+        });
 
         globalCache.__booknookCollectionsPromise = collectionsPromise;
     }
