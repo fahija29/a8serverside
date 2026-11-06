@@ -182,11 +182,12 @@ function serverError(res, message) {
 // HEALTH CHECK
 // GET /  and  GET /health
 //
-// On the Vercel serverless deployment the bare "/" path is resolved to
-// this handler's source file (api/index.js) by the CDN before the
-// function runs — so the canonical health endpoint is "/health", which
-// always reaches the function. Keep GET / for the long-running
-// `node index.js` workflow.
+// On Vercel, "/" used to be served as the static index.js source file
+// before the function ran. vercel.json now has an explicit
+// `{ "src": "/", "dest": "/api/index.js" }` route placed BEFORE the
+// filesystem handler, so GET / reaches the Express app on the
+// deployment. GET /health also works and always reaches the function.
+// Both are kept for the long-running `node index.js` workflow.
 app.get(["/", "/health"], (req, res) => {
     res.send({
         success: true,
